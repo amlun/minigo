@@ -40,7 +40,6 @@ func (r *BunUserRepository) GetByID(ctx context.Context, id int64) (*entity.User
 	var user = entity.User{ID: id}
 	err := db.NewSelect().
 		Model(&user).
-		Relation("Referrer").
 		WherePK().
 		Scan(ctx)
 	if err != nil {
@@ -54,7 +53,6 @@ func (r *BunUserRepository) GetByPhone(ctx context.Context, phone string) (*enti
 	var user entity.User
 	err := db.NewSelect().
 		Model(&user).
-		Relation("Referrer").
 		Where("phone = ?", phone).
 		Scan(ctx)
 	if err != nil {
