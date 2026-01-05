@@ -7,9 +7,13 @@
 - **清晰的架构分层** - 遵循 Clean Architecture 和领域驱动设计原则
 - **JWT 认证** - 内置用户认证和角色权限管理
 - **事务管理** - 优雅的数据库事务处理机制
+- **统一响应格式** - 标准化的 JSON 响应和错误处理
+- **分页支持** - 开箱即用的分页查询和过滤器
+- **请求追踪** - 每个请求自动生成唯一 ID，方便日志追踪
 - **配置管理** - 支持环境变量和配置文件（.env）
 - **中间件支持** - CORS、日志、错误处理、限流等
 - **Snowflake ID** - 分布式唯一 ID 生成
+- **丰富的工具库** - 验证器、类型转换、切片操作等实用工具
 - **PostgreSQL** - 使用 Bun ORM 操作数据库
 
 ## 技术栈
@@ -179,6 +183,75 @@ txManager.InTx(ctx, func(ctx context.Context) error {
 ### 添加新功能
 
 参考 `CLAUDE.md` 文件中的详细指南，了解如何添加新实体和端点。
+
+### 快速开发示例
+
+**1. 创建分页查询接口：**
+```go
+// 在 DTO 中定义请求
+type ListUserRequest struct {
+    dto.PageSortRequest
+    Keyword string `form:"keyword" json:"keyword"`
+}
+
+// 在 Handler 中处理
+func (h *UserHandler) List(c *gin.Context) {
+    var req ListUserRequest
+    if !middleware.ValidateAndBindQuery(c, &req) {
+        return
+    }
+
+    users, total, err := h.userService.List(c.Request.Context(), &req)
+    if !middleware.MustNotError(c, err) {
+        return
+    }
+
+    response.OkWithPage(c, users, total, req.GetPage(), req.GetPageSize())
+}
+```
+
+**2. 使用查询过滤器：**
+```go
+import "minigo/pkg/query"
+
+qb := query.NewQueryBuilder().
+    Like("name", keyword).
+    DateRange("created_at", startTime, endTime).
+    Order("created_at", true).
+    Paginate(page, pageSize)
+
+query := db.NewSelect().Model(&users)
+query = qb.Apply(query)
+```
+
+**3. 统一错误处理：**
+```go
+import apperrors "minigo/internal/domain/errors"
+
+// 创建业务错误
+if balance < amount {
+    return apperrors.NewBusinessError("INSUFFICIENT_BALANCE", "余额不足")
+}
+
+// 在 Handler 中自动处理
+if err != nil {
+    response.HandleError(c, err)
+    return
+}
+```
+
+**4. 使用验证器：**
+```go
+import "minigo/pkg/validator"
+
+if !validator.IsPhone(phone) {
+    return apperrors.NewValidationError("INVALID_PHONE", "手机号格式错误")
+}
+
+if !validator.LengthBetween(username, 3, 20) {
+    return apperrors.NewValidationError("INVALID_LENGTH", "用户名长度必须在3-20之间")
+}
+```
 
 ## 配置说明
 

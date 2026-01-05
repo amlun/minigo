@@ -25,6 +25,8 @@ func BuildRouter(db *bun.DB) *gin.Engine {
 
 	// CORS middleware first to handle preflight requests
 	engine.Use(middleware.CORSMiddleware())
+	// Request ID tracking
+	engine.Use(middleware.RequestIDMiddleware())
 	// global error handler
 	engine.Use(middleware.ErrorHandlerMiddleware())
 	engine.Use(gin.Recovery())

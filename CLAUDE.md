@@ -41,12 +41,21 @@ make test
 
 # Run tests in a specific package
 go test -v ./internal/domain/service
+
+# Run tests with coverage
+go test -cover ./...
 ```
 
 ### Dependencies
 ```bash
 # Tidy dependencies
 make tidy
+
+# Update all dependencies
+go get -u ./...
+
+# Vendor dependencies
+go mod vendor
 ```
 
 ### Database Migrations
@@ -111,28 +120,48 @@ migrations/          - SQL migration files
 - Use `dbctx.FromCtx(ctx, r.DB)` to get the correct DB/Tx handle
 
 **3. Error Handling**
-- Domain errors defined in `internal/domain/errors/`
+- Domain errors defined in `internal/domain/errors/` with typed error structure
 - Application errors in `internal/application/service/errors.go`
 - Infrastructure errors converted via `ConvertQueryError()`, `ConvertExecError()`
 - Middleware `ErrorHandlerMiddleware()` catches panics and formats responses
+- Use `response.HandleError()` or `middleware.AbortWithError()` for unified error responses
+- Error types: SystemError, BusinessError, ValidationError, AuthError, NotFoundError
 
-**4. Authentication Flow**
+**4. Response Format**
+- Unified JSON response structure via `internal/interfaces/response`
+- Success: `response.Ok(c, data)` or `response.OkWithPage(c, list, total, page, pageSize)`
+- Error: `response.HandleError(c, err)` or `response.ErrorFromAppError(c, appErr)`
+- All responses include: `success`, `code`, `message`, and optionally `data`
+
+**5. Pagination & Filtering**
+- Use `dto.PaginationRequest` for standard pagination parameters
+- Query filters available in `pkg/query` package
+- Example: `NewQueryBuilder().Where(...).Like(...).Paginate(page, size).Apply(query)`
+- Pagination response via `response.OkWithPage()`
+
+**6. Request Tracking**
+- Each request gets a unique ID via `RequestIDMiddleware()`
+- Request ID is returned in `X-Request-ID` header
+- All logs include request_id for tracing
+- Access via `middleware.GetRequestID(c)`
+
+**7. Authentication Flow**
 - JWT tokens generated in `infrastructure/auth/jwt.go`
 - Middleware `AuthMiddleware()` validates tokens and injects user info into context
 - `RoleAuthMiddleware()` enforces role-based access control
 - User passwords hashed with bcrypt in entity hooks (`BeforeInsert`, `BeforeUpdate`)
 
-**5. Configuration**
+**8. Configuration**
 - Config loaded from `.env` file (via gotenv) and environment variables
 - Viper provides unified access with `config.GetPort()`, `config.GetDBDsn()`, etc.
 - Supports multiple config file formats (YAML, JSON, TOML) - searched in `./`, `./cmd/server`, `./backend`
 
-**6. Router Setup**
+**9. Router Setup**
 - `BuildRouter(db *bun.DB)` in `internal/interfaces/http/router.go` wires up dependencies
 - Dependencies injected top-down: repositories → services → handlers
-- Middleware applied globally: CORS → ErrorHandler → Recovery → RequestLogger
+- Middleware order: CORS → RequestID → ErrorHandler → Recovery → RequestLogger
 
-**7. ID Generation**
+**10. ID Generation**
 - Snowflake IDs used for primary keys (64-bit integers)
 - Initialized once at startup via `id.Init()` in main.go
 - Entity IDs should be `int64` type with `bun:"id,pk,autoincrement"` tag (though Snowflake generates them, not DB)
@@ -180,13 +209,94 @@ OSS_TOKEN_EXPIRE_SECONDS=3600
 **Adding a New Endpoint:**
 1. Define DTOs for request/response in `internal/interfaces/dto/`
 2. Create handler method in appropriate handler file
-3. Register route in `BuildRouter()` with necessary middleware
-4. For authenticated routes, use `AuthMiddleware()` and optionally `RoleAuthMiddleware()`
+3. Use helper functions:
+   - `middleware.ValidateAndBindJSON(c, &req)` for JSON body
+   - `middleware.ValidateIDParam(c, "id")` for path parameters
+   - `middleware.MustNotError(c, err)` to abort on error
+4. Return responses:
+   - Success: `response.Ok(c, data)`
+   - Paginated: `response.OkWithPage(c, list, total, page, size)`
+   - Error: `response.HandleError(c, err)`
+5. Register route in `BuildRouter()` with necessary middleware
+6. For authenticated routes, use `AuthMiddleware()` and optionally `RoleAuthMiddleware()`
 
 **Implementing Business Logic:**
 - Simple CRUD → Application service
 - Complex domain rules → Domain service (in `internal/domain/service/`)
 - Cross-entity operations → Application service with transaction management
+
+**Pagination Query Example:**
+```go
+// In handler
+var req dto.PageSortRequest
+if !middleware.ValidateAndBindQuery(c, &req) {
+    return
+}
+
+// In service/repository
+list, total, err := repo.List(ctx, req.GetPage(), req.GetPageSize())
+if err != nil {
+    return nil, 0, err
+}
+
+// In handler response
+response.OkWithPage(c, list, total, req.GetPage(), req.GetPageSize())
+```
+
+**Query Filtering Example:**
+```go
+import "minigo/pkg/query"
+
+qb := query.NewQueryBuilder().
+    Like("name", searchKeyword).
+    DateRange("created_at", startTime, endTime).
+    Order("created_at", true).
+    Paginate(page, pageSize)
+
+query := db.NewSelect().Model(&models)
+query = qb.Apply(query)
+err := query.Scan(ctx)
+```
+
+**Error Handling Example:**
+```go
+// In service layer
+if user == nil {
+    return apperrors.ErrUserNotFound
+}
+
+// In handler
+if !middleware.MustNotError(c, err) {
+    return
+}
+
+// Or manually
+if err != nil {
+    response.HandleError(c, err)
+    return
+}
+```
+
+**Validation Example:**
+```go
+import "minigo/pkg/validator"
+
+// Use built-in validators
+if !validator.IsPhone(phone) {
+    return apperrors.NewValidationError("VAL_PHONE", "Invalid phone number")
+}
+
+if !validator.LengthBetween(username, 3, 20) {
+    return apperrors.NewValidationError("VAL_LENGTH", "Username must be 3-20 characters")
+}
+
+// In DTOs, use struct tags
+type CreateUserRequest struct {
+    Phone    string `json:"phone" binding:"required"`
+    Password string `json:"password" binding:"required,min=6"`
+    Name     string `json:"name" binding:"required,min=2,max=50"`
+}
+```
 
 ## Notes
 
