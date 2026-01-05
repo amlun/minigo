@@ -44,12 +44,11 @@ func (s *UserService) CreateUser(ctx context.Context, params CreateUserParams) (
 	)
 	// 构造用户实体
 	user = &entity.User{
-		ID:         id.NextID(),
-		Name:       params.Name,
-		Phone:      params.Phone,
-		Password:   params.Password,
-		Status:     params.Status,
-		ReferrerID: params.ReferrerID,
+		ID:       id.NextID(),
+		Name:     params.Name,
+		Phone:    params.Phone,
+		Password: params.Password,
+		Status:   params.Status,
 	}
 	// 在事务中执行
 	if err = s.txManager.InTx(ctx, func(txCtx context.Context) error {
